@@ -1,37 +1,69 @@
 const logger = require("./logger");
+const { saveDatabase } = require("../database/sqlite");
 
-const get = (db, sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (error, row) => {
-      if (error) {
-        logger.error(`[db.get] ${error.message}`);
-        return reject(error);
-      }
-      resolve(row);
-    });
-  });
+// sql.js için wrapper fonksiyonlar
+// Promise döndürmüyor, direkt senkron çalışıyor
+// Mevcut async/await kodu için Promise.resolve() ile sarmalı
 
-const all = (db, sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.all(sql, params, (error, rows) => {
-      if (error) {
-        logger.error(`[db.all] ${error.message}`);
-        return reject(error);
-      }
-      resolve(rows || []);
-    });
-  });
+const get = async (db, sql, params = []) => {
+  try {
+    const stmt = db.prepare(sql);
+    if (params.length > 0) {
+      stmt.bind(params);
+    }
+    
+    let row = null;
+    if (stmt.step()) {
+      row = stmt.getAsObject();
+    }
+    stmt.free();
+    
+    return row;
+  } catch (error) {
+    logger.error(`[db.get] ${error.message}`);
+    throw error;
+  }
+};
 
-const run = (db, sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.run(sql, params, function (error) {
-      if (error) {
-        logger.error(`[db.run] ${error.message}`);
-        return reject(error);
-      }
-      resolve(this);
-    });
-  });
+const all = async (db, sql, params = []) => {
+  try {
+    const stmt = db.prepare(sql);
+    if (params.length > 0) {
+      stmt.bind(params);
+    }
+    
+    const rows = [];
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject());
+    }
+    stmt.free();
+    
+    return rows || [];
+  } catch (error) {
+    logger.error(`[db.all] ${error.message}`);
+    throw error;
+  }
+};
+
+const run = async (db, sql, params = []) => {
+  try {
+    const stmt = db.prepare(sql);
+    if (params.length > 0) {
+      stmt.bind(params);
+    }
+    
+    stmt.step();
+    stmt.free();
+    
+    // Veritabanı değiştiğinden, diskte kaydet
+    saveDatabase();
+    
+    return { changes: db.getRowsModified() };
+  } catch (error) {
+    logger.error(`[db.run] ${error.message}`);
+    throw error;
+  }
+};
 
 module.exports = {
   get,

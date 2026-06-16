@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.env.local
+README.md
+.vscode
+.idea
+src/database/database.sqlite
+src/database/database.sqlite-shm
+src/database/database.sqlite-wal
