@@ -35,21 +35,23 @@ module.exports = {
       return interaction.reply({ content: "Kullanıcı sunucuda bulunamadı.", ephemeral: true });
     }
 
+    // FIX: Guard against db not being initialized yet
+    if (!interaction.client.db) {
+      return interaction.reply({ content: "Veritabanı henüz hazır değil, lütfen tekrar deneyin.", ephemeral: true });
+    }
+
     const createdAt = new Date().toISOString();
-    const insertWarning = () =>
-      new Promise((resolve, reject) => {
-        interaction.client.db.run(
-          "INSERT INTO warnings (guildId, userId, moderatorId, reason, createdAt) VALUES (?, ?, ?, ?, ?)",
-          [interaction.guild.id, target.id, interaction.user.id, reason, createdAt],
-          function (error) {
-            if (error) return reject(error);
-            resolve(this.lastID);
-          },
-        );
-      });
 
     try {
-      await insertWarning();
+      // FIX: Use runAsync instead of a callback-wrapped Promise.
+      // The old callback pattern had a race condition: sqlite.js calls the
+      // callback synchronously, so resolve(this.lastID) fired inside the
+      // same tick as the Promise constructor — fragile in some V8 builds.
+      // runAsync() is the clean async wrapper already provided by the shim.
+      await interaction.client.db.runAsync(
+        "INSERT INTO warnings (guildId, userId, moderatorId, reason, createdAt) VALUES (?, ?, ?, ?, ?)",
+        [interaction.guild.id, target.id, interaction.user.id, reason, createdAt],
+      );
     } catch (error) {
       return interaction.reply({ content: "Uyarı kaydedilirken bir hata oluştu.", ephemeral: true });
     }

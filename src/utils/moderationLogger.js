@@ -26,37 +26,29 @@ const buildModerationEmbed = ({ action, target, moderator, reason, details, guil
   return embed;
 };
 
-const getLogChannelFromSettings = (guild, db) => {
-  return new Promise((resolve) => {
-    db.get("SELECT logChannelId FROM log_settings WHERE guildId = ?", [guild.id], async (error, row) => {
-      if (error) {
-        logger.error(`[getLogChannelFromSettings] ${error.message}`);
-        resolve(null);
-        return;
-      }
+const getLogChannelFromSettings = async (guild, db) => {
+  try {
+    const row = await db.getAsync("SELECT logChannelId FROM log_settings WHERE guildId = ?", [guild.id]);
+    if (!row?.logChannelId) return null;
 
-      if (!row || !row.logChannelId) {
-        resolve(null);
-        return;
+    try {
+      const channel = await guild.channels.fetch(row.logChannelId);
+      if (
+        channel &&
+        channel.type === ChannelType.GuildText &&
+        channel.permissionsFor(guild.members.me)?.has(PermissionFlagsBits.SendMessages)
+      ) {
+        return channel;
       }
+    } catch (error) {
+      logger.error(`[getLogChannelFromSettings] ${error.message}`);
+    }
 
-      try {
-        const channel = await guild.channels.fetch(row.logChannelId);
-        if (
-          channel &&
-          channel.type === ChannelType.GuildText &&
-          channel.permissionsFor(guild.members.me)?.has(PermissionFlagsBits.SendMessages)
-        ) {
-          resolve(channel);
-        } else {
-          resolve(null);
-        }
-      } catch (error) {
-        logger.error(`[getLogChannelFromSettings] ${error.message}`);
-        resolve(null);
-      }
-    });
-  });
+    return null;
+  } catch (error) {
+    logger.error(`[getLogChannelFromSettings] ${error.message}`);
+    return null;
+  }
 };
 
 const findModerationLogChannel = (guild) => {

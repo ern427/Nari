@@ -28,34 +28,27 @@ const generateTicketId = (guildTicketCount) => {
   return `TICKET-${String(guildTicketCount + 1).padStart(5, "0")}`;
 };
 
-const getNextTicketNumber = (guild, db) => {
-  return new Promise((resolve) => {
-    db.get("SELECT COUNT(*) as count FROM ticket_system WHERE guildId = ?", [guild.id], (error, row) => {
-      if (error) {
-        logger.error(`[getNextTicketNumber] ${error.message}`);
-        resolve(1);
-      } else {
-        resolve((row?.count || 0) + 1);
-      }
-    });
-  });
+const getNextTicketNumber = async (guild, db) => {
+  try {
+    const row = await db.getAsync("SELECT COUNT(*) as count FROM ticket_system WHERE guildId = ?", [guild.id]);
+    return (row?.count || 0) + 1;
+  } catch (error) {
+    logger.error(`[getNextTicketNumber] ${error.message}`);
+    return 1;
+  }
 };
 
-const getUserOpenTickets = (userId, guildId, db) => {
-  return new Promise((resolve) => {
-    db.all(
+const getUserOpenTickets = async (userId, guildId, db) => {
+  try {
+    const rows = await db.allAsync(
       "SELECT * FROM ticket_system WHERE ownerId = ? AND guildId = ? AND closedAt IS NULL",
       [userId, guildId],
-      (error, rows) => {
-        if (error) {
-          logger.error(`[getUserOpenTickets] ${error.message}`);
-          resolve([]);
-        } else {
-          resolve(rows || []);
-        }
-      },
     );
-  });
+    return rows || [];
+  } catch (error) {
+    logger.error(`[getUserOpenTickets] ${error.message}`);
+    return [];
+  }
 };
 
 const createTicket = async (guild, user, category, client) => {
@@ -99,17 +92,11 @@ const createTicket = async (guild, user, category, client) => {
     }
 
     // Save to database
-    await new Promise((resolve, reject) => {
-      client.db.run(
-        `INSERT INTO ticket_system (ticketId, guildId, channelId, ownerId, category, createdAt)
+    await client.db.runAsync(
+      `INSERT INTO ticket_system (ticketId, guildId, channelId, ownerId, category, createdAt)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [ticketId, guild.id, channel.id, user.id, category, new Date().toISOString()],
-        function (error) {
-          if (error) reject(error);
-          else resolve(this.lastID);
-        },
-      );
-    });
+      [ticketId, guild.id, channel.id, user.id, category, new Date().toISOString()],
+    );
 
     // Send welcome embed
     const embed = new EmbedBuilder()
@@ -138,16 +125,14 @@ const createTicket = async (guild, user, category, client) => {
   }
 };
 
-const getLogChannelIdForGuild = (guildId, db) => {
-  return new Promise((resolve) => {
-    db.get("SELECT logChannelId FROM log_settings WHERE guildId = ?", [guildId], (error, row) => {
-      if (error) {
-        logger.error(`[getLogChannelIdForGuild] ${error.message}`);
-        return resolve(null);
-      }
-      resolve(row?.logChannelId || null);
-    });
-  });
+const getLogChannelIdForGuild = async (guildId, db) => {
+  try {
+    const row = await db.getAsync("SELECT logChannelId FROM log_settings WHERE guildId = ?", [guildId]);
+    return row?.logChannelId || null;
+  } catch (error) {
+    logger.error(`[getLogChannelIdForGuild] ${error.message}`);
+    return null;
+  }
 };
 
 const closeTicket = async (channel, closedBy, client, db) => {
@@ -156,12 +141,7 @@ const closeTicket = async (channel, closedBy, client, db) => {
       throw new Error("Geçersiz kanal bilgisi");
     }
 
-    const ticket = await new Promise((resolve, reject) => {
-      db.get("SELECT * FROM ticket_system WHERE channelId = ?", [channel.id], (error, row) => {
-        if (error) reject(error);
-        else resolve(row);
-      });
-    });
+    const ticket = await db.getAsync("SELECT * FROM ticket_system WHERE channelId = ?", [channel.id]);
 
     if (!ticket) {
       throw new Error("Ticket bulunamadı");
@@ -179,16 +159,10 @@ const closeTicket = async (channel, closedBy, client, db) => {
       logger.error(`[closeTicket] Transcript oluşturulurken hata: ${error.message}`);
     }
 
-    await new Promise((resolve, reject) => {
-      db.run(
-        "UPDATE ticket_system SET closedAt = ?, closedBy = ? WHERE channelId = ?",
-        [new Date().toISOString(), closedBy, channel.id],
-        function (error) {
-          if (error) reject(error);
-          else resolve();
-        },
-      );
-    });
+    await db.runAsync(
+      "UPDATE ticket_system SET closedAt = ?, closedBy = ? WHERE channelId = ?",
+      [new Date().toISOString(), closedBy, channel.id],
+    );
 
     const logChannelId = await getLogChannelIdForGuild(channel.guild.id, db);
     if (logChannelId && transcript) {
