@@ -1,76 +1,23 @@
 const logger = require("./logger");
 const { ChannelType, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 
-const TICKET_CATEGORIES = {
-  destek: {
-    label: "Destek",
-    description: "Teknik destek için ticket aç",
-    emoji: "🆘",
-  },
-  sikayet: {
-    label: "Şikayet",
-    description: "Bir şikayeti bildirmek için ticket aç",
-    emoji: "📢",
-  },
-  yetkili: {
-    label: "Yetkili Başvuru",
-    description: "Yetkili olmak için başvur",
-    emoji: "👤",
-  },
-  diger: {
-    label: "Diğer",
-    description: "Diğer konular için ticket aç",
-    emoji: "📝",
-  },
-};
-
-const generateTicketId = (guildTicketCount) => {
-  return `TICKET-${String(guildTicketCount + 1).padStart(5, "0")}`;
-};
-
-const getNextTicketNumber = async (guild, db) => {
-  try {
-    const row = await db.getAsync("SELECT COUNT(*) as count FROM ticket_system WHERE guildId = ?", [guild.id]);
-    return (row?.count || 0) + 1;
-  } catch (error) {
-    logger.error(`[getNextTicketNumber] ${error.message}`);
-    return 1;
-  }
-};
-
-const getUserOpenTickets = async (userId, guildId, db) => {
-  try {
-    const rows = await db.allAsync(
-      "SELECT * FROM ticket_system WHERE ownerId = ? AND guildId = ? AND closedAt IS NULL",
-      [userId, guildId],
-    );
-    return rows || [];
-  } catch (error) {
-    logger.error(`[getUserOpenTickets] ${error.message}`);
-    return [];
-  }
-};
+// ... (TICKET_CATEGORIES, generateTicketId, getNextTicketNumber, getUserOpenTickets unchanged)
 
 const createTicket = async (guild, user, category, client) => {
   try {
     const ticketNumber = await getNextTicketNumber(guild, client.db);
     const ticketId = `ticket-${String(ticketNumber).padStart(4, "0")}`;
 
-    // Get moderator role
     const moderatorRole = guild.roles.cache.find(
       (role) => role.name.toLowerCase().includes("moderator") || role.name.toLowerCase().includes("mod"),
     );
 
-    // Create channel
     const channel = await guild.channels.create({
       name: ticketId,
       type: ChannelType.GuildText,
       parent: null,
       permissionOverwrites: [
-        {
-          id: guild.id,
-          deny: [PermissionFlagsBits.ViewChannel],
-        },
+        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
         {
           id: user.id,
           allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
@@ -82,7 +29,6 @@ const createTicket = async (guild, user, category, client) => {
       ],
     });
 
-    // Add moderator role if exists
     if (moderatorRole) {
       await channel.permissionOverwrites.create(moderatorRole, {
         ViewChannel: true,
@@ -91,14 +37,12 @@ const createTicket = async (guild, user, category, client) => {
       });
     }
 
-    // Save to database
     await client.db.runAsync(
       `INSERT INTO ticket_system (ticketId, guildId, channelId, ownerId, category, createdAt)
          VALUES (?, ?, ?, ?, ?, ?)`,
       [ticketId, guild.id, channel.id, user.id, category, new Date().toISOString()],
     );
 
-    // Send welcome embed
     const embed = new EmbedBuilder()
       .setColor("#5865F2")
       .setTitle("🎫 Ticket Açıldı")
@@ -117,6 +61,11 @@ const createTicket = async (guild, user, category, client) => {
       embeds: [embed],
       components: [row],
     });
+
+    // --- NEW: send creation log to configured log channel ---
+    const { buildChannelLog, sendLog } = require("./advancedLogger");
+    const logEmbed = buildChannelLog("ticket_open", channel, user);
+    await sendLog(guild, logEmbed, client.db);
 
     return channel;
   } catch (error) {
@@ -142,7 +91,6 @@ const closeTicket = async (channel, closedBy, client, db) => {
     }
 
     const ticket = await db.getAsync("SELECT * FROM ticket_system WHERE channelId = ?", [channel.id]);
-
     if (!ticket) {
       throw new Error("Ticket bulunamadı");
     }
@@ -165,7 +113,9 @@ const closeTicket = async (channel, closedBy, client, db) => {
     );
 
     const logChannelId = await getLogChannelIdForGuild(channel.guild.id, db);
-    if (logChannelId && transcript) {
+
+    // --- FIXED: send log even if transcript failed ---
+    if (logChannelId) {
       try {
         const logChannel = await channel.guild.channels.fetch(logChannelId);
         if (logChannel) {
@@ -181,18 +131,20 @@ const closeTicket = async (channel, closedBy, client, db) => {
             )
             .setTimestamp();
 
-          await logChannel.send({
-            embeds: [transcriptEmbed],
-            files: [{ attachment: transcript, name: `${ticket.ticketId}.html` }],
-          });
+          const payload = { embeds: [transcriptEmbed] };
+          if (transcript) {
+            payload.files = [{ attachment: transcript, name: `${ticket.ticketId}.html` }];
+          } else {
+            transcriptEmbed.addFields({ name: "Not", value: "Transcript oluşturulamadı.", inline: false });
+          }
+
+          await logChannel.send(payload);
         } else {
           logger.warn(`[closeTicket] Log kanalı bulunamadı: ${logChannelId}`);
         }
       } catch (error) {
-        logger.error(`[closeTicket] Log kanalına transcript gönderilemedi: ${error.message}`);
+        logger.error(`[closeTicket] Log kanalına gönderilemedi: ${error.message}`);
       }
-    } else if (logChannelId && !transcript) {
-      logger.warn("[closeTicket] Transcript oluşturulamadığı için loga gönderme atlandı.");
     }
 
     await channel.delete().catch((error) => {

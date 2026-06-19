@@ -27,13 +27,13 @@ module.exports = {
       return interaction.reply({ content: "Lütfen 1 ile 100 arasında bir sayı girin.", ephemeral: true });
     }
 
-    const fetched = await interaction.channel.messages.fetch({ limit: amount + 1 }).catch(() => null);
+    // Fetch exactly the requested amount; the interaction is not a message in the channel
+    const fetched = await interaction.channel.messages.fetch({ limit: amount }).catch(() => null);
     if (!fetched) {
       return interaction.reply({ content: "Mesajlar alınırken bir hata oluştu.", ephemeral: true });
     }
 
-    const messages = fetched.filter((msg) => msg.id !== interaction.id);
-    const deleted = await interaction.channel.bulkDelete(messages, true).catch(() => null);
+    const deleted = await interaction.channel.bulkDelete(fetched, true).catch(() => null);
 
     if (!deleted) {
       return interaction.reply({ content: "Mesajlar silinirken bir hata oluştu veya mesajlar çok eski.", ephemeral: true });
